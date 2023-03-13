@@ -28,8 +28,22 @@ type NsqClusterSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of NsqCluster. Edit nsqcluster_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	NsqLookupD NsqLookupDTemplate `json:"nsqlookupd"`
+
+	NsqD NsqDTemplate `json:"nsqd"`
+
+	NsqAdmin NsqAdminTemplate `json:"nsqadmin,omitempty"`
+}
+
+type NsqLookupDTemplate struct {
+	Replicas int `json:"replicas,omitempty"`
+}
+
+type NsqDTemplate struct {
+	Replicas int `json:"replicas,omitempty"`
+}
+
+type NsqAdminTemplate struct {
 }
 
 // NsqClusterStatus defines the observed state of NsqCluster
