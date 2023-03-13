@@ -1,0 +1,27 @@
+# permissions for end users to view nsqclusters.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: nsqcluster-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: nsq-operator
+    app.kubernetes.io/part-of: nsq-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: nsqcluster-viewer-role
+rules:
+- apiGroups:
+  - apps.yebaoping.cn
+  resources:
+  - nsqclusters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - apps.yebaoping.cn
+  resources:
+  - nsqclusters/status
+  verbs:
+  - get

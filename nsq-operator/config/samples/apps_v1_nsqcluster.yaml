@@ -1,0 +1,12 @@
+apiVersion: apps.yebaoping.cn/v1
+kind: NsqCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: nsqcluster
+    app.kubernetes.io/instance: nsqcluster-sample
+    app.kubernetes.io/part-of: nsq-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: nsq-operator
+  name: nsqcluster-sample
+spec:
+  # TODO(user): Add fields here
