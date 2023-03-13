@@ -50,6 +50,18 @@ type NsqAdminTemplate struct {
 type NsqClusterStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	NsqLookupD NsqLookupDStatus `json:"nsqlookupd,omitempty"`
+
+	NsqAdmin NsqAdminStatus `json:"nsqadmin,omitempty"`
+}
+
+type NsqLookupDStatus struct {
+	Services []string `json:"services,omitempty"`
+}
+
+type NsqAdminStatus struct {
+	Address string `json:"address,omitempty"`
 }
 
 //+kubebuilder:object:root=true
