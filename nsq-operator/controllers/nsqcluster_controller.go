@@ -18,24 +18,44 @@ package controllers
 
 import (
 	"context"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/tools/record"
+	"reflect"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"time"
 
+	apiv1 "github.com/yebaoping/nsq-operator/api/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	appsv1 "github.com/yebaoping/nsq-operator/api/v1"
+	"github.com/go-logr/logr"
 )
 
 // NsqClusterReconciler reconciles a NsqCluster object
 type NsqClusterReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	record.EventRecorder
+	Log logr.Logger
 }
 
 //+kubebuilder:rbac:groups=apps.yebaoping.cn,resources=nsqclusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=apps.yebaoping.cn,resources=nsqclusters/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=apps.yebaoping.cn,resources=nsqclusters/finalizers,verbs=update
+
+//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=services/status,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=apps,resources=statefulsets/status,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=pods/status,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -47,9 +67,29 @@ type NsqClusterReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.1/pkg/reconcile
 func (r *NsqClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	r.Log.Info("nsqclusters reconcile", "request", req.String())
 
-	// TODO(user): your logic here
+	nsqCluster := &apiv1.NsqCluster{}
+	if err := r.Get(ctx, req.NamespacedName, nsqCluster); err != nil {
+		// 已删除
+		if errors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+
+		r.Log.Error(err, "Get NsqCluster error")
+		r.EventRecorder.Event(nsqCluster, corev1.EventTypeWarning, err.Error(), "Get NsqCluster error")
+		return ctrl.Result{RequeueAfter: time.Second}, err
+	}
+
+	if res, err := r.reconcileNsqLookupD(ctx, nsqCluster, req); err != nil {
+		return res, err
+	}
+	if res, err := r.reconcileNsqD(ctx, nsqCluster, req); err != nil {
+		return res, err
+	}
+	if res, err := r.reconcileNsqAdmin(ctx, nsqCluster, req); err != nil {
+		return res, err
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -57,6 +97,133 @@ func (r *NsqClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NsqClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&appsv1.NsqCluster{}).
+		For(&apiv1.NsqCluster{}, builder.WithPredicates(predicate.Funcs{
+			CreateFunc: func(createEvent event.CreateEvent) bool {
+				return true
+			},
+			DeleteFunc: func(event event.DeleteEvent) bool {
+				r.Log.Info("Resource deleted", "NamespacedName", event.Object.GetNamespace()+"/"+event.Object.GetName())
+
+				return false
+			},
+			UpdateFunc: func(event event.UpdateEvent) bool {
+				if event.ObjectNew.GetResourceVersion() == event.ObjectOld.GetResourceVersion() {
+					return false
+				}
+
+				newObj, ok := event.ObjectNew.(*apiv1.NsqCluster)
+				if !ok {
+					return false
+				}
+				oldObj, ok := event.ObjectOld.(*apiv1.NsqCluster)
+				if !ok {
+					return false
+				}
+				if reflect.DeepEqual(newObj.Spec, oldObj.Spec) {
+					return false
+				}
+
+				r.Log.Info("Resource update", "NamespacedName", event.ObjectNew.GetNamespace()+"/"+event.ObjectNew.GetName(),
+					"old_spec", oldObj.Spec, "new_spec", newObj.Spec)
+
+				return true
+			},
+		})).
+		Owns(&corev1.Service{}, builder.WithPredicates(predicate.Funcs{
+			CreateFunc: func(event event.CreateEvent) bool {
+				return false
+			},
+			DeleteFunc: func(event event.DeleteEvent) bool {
+				r.Log.Info("Service deleted", "NamespacedName", event.Object.GetNamespace()+"/"+event.Object.GetName())
+
+				return true
+			},
+			UpdateFunc: func(event event.UpdateEvent) bool {
+				if event.ObjectNew.GetResourceVersion() == event.ObjectOld.GetResourceVersion() {
+					return false
+				}
+
+				newObj, ok := event.ObjectNew.(*corev1.Service)
+				if !ok {
+					return false
+				}
+				oldObj, ok := event.ObjectOld.(*corev1.Service)
+				if !ok {
+					return false
+				}
+				if reflect.DeepEqual(newObj.Spec, oldObj.Spec) {
+					return false
+				}
+
+				r.Log.Info("Service update", "NamespacedName", event.ObjectNew.GetNamespace()+"/"+event.ObjectNew.GetName(),
+					"old_spec", oldObj.Spec, "new_spec", newObj.Spec)
+
+				return true
+			},
+		})).
+		Owns(&appsv1.StatefulSet{}, builder.WithPredicates(predicate.Funcs{
+			CreateFunc: func(event event.CreateEvent) bool {
+				return false
+			},
+			DeleteFunc: func(event event.DeleteEvent) bool {
+				r.Log.Info("StatefulSet deleted", "NamespacedName", event.Object.GetNamespace()+"/"+event.Object.GetName())
+
+				return true
+			},
+			UpdateFunc: func(event event.UpdateEvent) bool {
+				if event.ObjectNew.GetResourceVersion() == event.ObjectOld.GetResourceVersion() {
+					return false
+				}
+
+				newObj, ok := event.ObjectNew.(*appsv1.StatefulSet)
+				if !ok {
+					return false
+				}
+				oldObj, ok := event.ObjectOld.(*appsv1.StatefulSet)
+				if !ok {
+					return false
+				}
+				if reflect.DeepEqual(newObj.Spec, oldObj.Spec) {
+					return false
+				}
+
+				r.Log.Info("StatefulSet update", "NamespacedName", event.ObjectNew.GetNamespace()+"/"+event.ObjectNew.GetName(),
+					"old_spec", oldObj.Spec, "new_spec", newObj.Spec)
+
+				return true
+			},
+		})).
+		Owns(&appsv1.Deployment{}, builder.WithPredicates(predicate.Funcs{
+			CreateFunc: func(event event.CreateEvent) bool {
+				return false
+			},
+			DeleteFunc: func(event event.DeleteEvent) bool {
+				r.Log.Info("Deployment deleted", "NamespacedName", event.Object.GetNamespace()+"/"+event.Object.GetName())
+
+				return true
+			},
+			UpdateFunc: func(event event.UpdateEvent) bool {
+				if event.ObjectNew.GetResourceVersion() == event.ObjectOld.GetResourceVersion() {
+					return false
+				}
+
+				newObj, ok := event.ObjectNew.(*appsv1.Deployment)
+				if !ok {
+					return false
+				}
+				oldObj, ok := event.ObjectOld.(*appsv1.Deployment)
+				if !ok {
+					return false
+				}
+				if reflect.DeepEqual(newObj.Spec, oldObj.Spec) {
+					return false
+				}
+
+				r.Log.Info("Deployment update", "NamespacedName", event.ObjectNew.GetNamespace()+"/"+event.ObjectNew.GetName(),
+					"old_spec", oldObj.Spec, "new_spec", newObj.Spec)
+
+				return true
+			},
+		})).
 		Complete(r)
 }

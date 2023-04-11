@@ -53,10 +53,16 @@ type NsqClusterStatus struct {
 
 	NsqLookupD NsqLookupDStatus `json:"nsqlookupd,omitempty"`
 
+	NsqD NsqDStatus `json:"nsqd,omitempty"`
+
 	NsqAdmin NsqAdminStatus `json:"nsqadmin,omitempty"`
 }
 
 type NsqLookupDStatus struct {
+	Services []string `json:"services,omitempty"`
+}
+
+type NsqDStatus struct {
 	Services []string `json:"services,omitempty"`
 }
 

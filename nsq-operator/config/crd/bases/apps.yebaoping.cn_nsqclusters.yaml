@@ -59,6 +59,13 @@ spec:
                   address:
                     type: string
                 type: object
+              nsqd:
+                properties:
+                  services:
+                    items:
+                      type: string
+                    type: array
+                type: object
               nsqlookupd:
                 properties:
                   services:
