@@ -208,6 +208,12 @@ func generateNsqDStsSpec(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Re
 				Labels: NsqDLabels,
 			},
 			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{
+						Name:  "nsqcluster-nsqd-init",
+						Image: "busybox",
+					},
+				},
 				Containers: []corev1.Container{
 					{
 						Name:    NsqDPodName,
@@ -245,10 +251,18 @@ func generateNsqDStsSpec(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Re
 	spec.Replicas = new(int32)
 	*spec.Replicas = int32(app.Spec.NsqD.Replicas)
 
+	var initContainerCmd string
+
 	for i := 0; i < app.Spec.NsqLookupD.Replicas; i++ {
+		lookupDAddr := fmt.Sprintf("%s-%d.%s", NsqLookupDStsName, i, NsqLookupDSvcName)
+
+		initContainerCmd += fmt.Sprintf("until ping %s -c 1; do echo waiting for %s; sleep 2; done;", lookupDAddr, lookupDAddr)
+
 		spec.Template.Spec.Containers[0].Args = append(spec.Template.Spec.Containers[0].Args,
-			fmt.Sprintf("--lookupd-tcp-address=%s-%d.%s:4160", NsqLookupDStsName, i, NsqLookupDSvcName))
+			fmt.Sprintf("--lookupd-tcp-address=%s:4160", lookupDAddr))
 	}
+
+	spec.Template.Spec.InitContainers[0].Command = []string{"sh", "-c", initContainerCmd}
 
 	return spec
 }

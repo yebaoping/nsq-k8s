@@ -46,13 +46,9 @@ func (r *NsqClusterReconciler) reconcileNsqAdmin(ctx context.Context, app *apiv1
 		return ctrl.Result{RequeueAfter: time.Second}, err
 	}
 	if len(pods.Items) == 0 || pods.Items[0].Status.HostIP == "" {
-		err := fmt.Errorf("reconcileNsqAdmin get nsqAdmin pods empty or host ip empty")
-		msg := fmt.Sprintf("pods:%d", len(pods.Items))
-		if len(pods.Items) > 0 {
-			msg += fmt.Sprintf(",HostIP:%s", pods.Items[0].Status.HostIP)
-		}
-		r.Log.Error(err, msg)
-		return ctrl.Result{RequeueAfter: time.Second * 5}, err
+		r.Log.Info("reconcileNsqAdmin get nsqAdmin pods empty or host ip empty,requeue after 5 seconds")
+
+		return ctrl.Result{RequeueAfter: time.Second * 5}, fmt.Errorf("reconcileNsqAdmin get nsqAdmin pods empty or host ip empty")
 	}
 
 	app.Status.NsqAdmin.Address = fmt.Sprintf("http://%s:30001", pods.Items[0].Status.HostIP)
@@ -213,6 +209,12 @@ func generateNsqAdminDeploySpec(ctx context.Context, app *apiv1.NsqCluster, req 
 				Labels: NsqAdminLabels,
 			},
 			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{
+						Name:  "nsqcluster-nsqadmin-init",
+						Image: "busybox",
+					},
+				},
 				Containers: []corev1.Container{
 					{
 						Name:    NsqAdminPodName,
@@ -233,10 +235,18 @@ func generateNsqAdminDeploySpec(ctx context.Context, app *apiv1.NsqCluster, req 
 	spec.Replicas = new(int32)
 	*spec.Replicas = 1
 
+	var initContainerCmd string
+
 	spec.Template.Spec.Containers[0].Args = make([]string, app.Spec.NsqLookupD.Replicas)
 	for i := 0; i < app.Spec.NsqLookupD.Replicas; i++ {
-		spec.Template.Spec.Containers[0].Args[i] = fmt.Sprintf("--lookupd-http-address=%s-%d.%s:4161", NsqLookupDStsName, i, NsqLookupDSvcName)
+		lookupDAddr := fmt.Sprintf("%s-%d.%s", NsqLookupDStsName, i, NsqLookupDSvcName)
+
+		initContainerCmd += fmt.Sprintf("until ping %s -c 1; do echo waiting for %s; sleep 2; done;", lookupDAddr, lookupDAddr)
+
+		spec.Template.Spec.Containers[0].Args[i] = fmt.Sprintf("--lookupd-http-address=%s:4161", lookupDAddr)
 	}
+
+	spec.Template.Spec.InitContainers[0].Command = []string{"sh", "-c", initContainerCmd}
 
 	return spec
 }
