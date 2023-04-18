@@ -61,10 +61,8 @@ spec:
                 type: object
               nsqd:
                 properties:
-                  services:
-                    items:
-                      type: string
-                    type: array
+                  service:
+                    type: string
                 type: object
               nsqlookupd:
                 properties:

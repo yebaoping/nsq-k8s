@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: repo.harbor.me/test/nsq-operator
-  newTag: "2023041306"
+  newTag: "2023041701"

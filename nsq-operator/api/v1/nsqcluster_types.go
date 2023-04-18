@@ -63,7 +63,7 @@ type NsqLookupDStatus struct {
 }
 
 type NsqDStatus struct {
-	Services []string `json:"services,omitempty"`
+	Service string `json:"service,omitempty"`
 }
 
 type NsqAdminStatus struct {

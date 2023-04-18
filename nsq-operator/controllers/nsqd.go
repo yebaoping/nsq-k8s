@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	NsqDSvcName = "nsqcluster-nsqd"
-	NsqDStsName = "nsqcluster-nsqd"
-	NsqDPodName = "nsqcluster-nsqd"
+	NsqDSvcName    = "nsqcluster-nsqd"
+	NsqDDeployName = "nsqcluster-nsqd"
+	NsqDPodName    = "nsqcluster-nsqd"
 )
 
 var NsqDLabels = map[string]string{
@@ -33,16 +33,13 @@ func (r *NsqClusterReconciler) reconcileNsqD(ctx context.Context, app *apiv1.Nsq
 		return res, err
 	}
 
-	res, err = r.reconcileNsqDSts(ctx, app, req)
+	res, err = r.reconcileNsqDDeploy(ctx, app, req)
 	if err != nil {
 		return res, err
 	}
 
 	// 更新主资源Status
-	app.Status.NsqD.Services = make([]string, app.Spec.NsqD.Replicas)
-	for i := 0; i < app.Spec.NsqD.Replicas; i++ {
-		app.Status.NsqD.Services[i] = fmt.Sprintf("%s-%d.%s", NsqDStsName, i, NsqDSvcName)
-	}
+	app.Status.NsqD.Service = NsqDSvcName
 	if err := r.Status().Update(ctx, app); err != nil {
 		r.Log.Error(err, "reconcileNsqD update status error")
 		return ctrl.Result{RequeueAfter: time.Second}, err
@@ -114,53 +111,53 @@ func (r *NsqClusterReconciler) updateNsqDSvc(ctx context.Context, app *apiv1.Nsq
 	return ctrl.Result{}, nil
 }
 
-func (r *NsqClusterReconciler) reconcileNsqDSts(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Request) (ctrl.Result, error) {
-	sts := &appsv1.StatefulSet{}
-	err := r.Get(ctx, types.NamespacedName{Namespace: req.Namespace, Name: NsqDStsName}, sts)
+func (r *NsqClusterReconciler) reconcileNsqDDeploy(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Request) (ctrl.Result, error) {
+	deploy := &appsv1.Deployment{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: req.Namespace, Name: NsqDDeployName}, deploy)
 	if errors.IsNotFound(err) {
 		// 不存在，新建
-		return r.createNsqDSts(ctx, app, req)
+		return r.createNsqDDeploy(ctx, app, req)
 	}
 	if err != nil {
-		r.Log.Error(err, "Get nsqd statefulset error")
+		r.Log.Error(err, "Get nsqd deployment error")
 		return ctrl.Result{RequeueAfter: time.Second}, err
 	}
 
 	// 已经存在
-	return r.updateNsqDSts(ctx, app, req, sts)
+	return r.updateNsqDDeploy(ctx, app, req, deploy)
 }
 
-func (r *NsqClusterReconciler) createNsqDSts(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Request) (ctrl.Result, error) {
-	newSts := &appsv1.StatefulSet{
+func (r *NsqClusterReconciler) createNsqDDeploy(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Request) (ctrl.Result, error) {
+	newDeploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      NsqDStsName,
+			Name:      NsqDDeployName,
 			Namespace: req.Namespace,
 			Labels:    NsqDLabels,
 		},
 	}
-	newSts.Spec = generateNsqDStsSpec(ctx, app, req)
+	newDeploy.Spec = generateNsqDDeploySpec(ctx, app, req)
 
-	if err := ctrl.SetControllerReference(app, newSts, r.Scheme); err != nil {
-		r.Log.Error(err, "reconcileNsqD set controller reference statefulset error")
+	if err := ctrl.SetControllerReference(app, newDeploy, r.Scheme); err != nil {
+		r.Log.Error(err, "reconcileNsqD set controller reference deployment error")
 		return ctrl.Result{RequeueAfter: time.Second}, err
 	}
 
-	if err := r.Create(ctx, newSts); err != nil {
-		r.Log.Error(err, "reconcileNsqD create statefulset error")
+	if err := r.Create(ctx, newDeploy); err != nil {
+		r.Log.Error(err, "reconcileNsqD create deployment error")
 		return ctrl.Result{RequeueAfter: time.Second}, err
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (r *NsqClusterReconciler) updateNsqDSts(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Request, old *appsv1.StatefulSet) (ctrl.Result, error) {
+func (r *NsqClusterReconciler) updateNsqDDeploy(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Request, old *appsv1.Deployment) (ctrl.Result, error) {
 	// 对比space是否改动
-	spec := generateNsqDStsSpec(ctx, app, req)
-	if !nsqDStsSpecEqual(old.Spec, spec) {
+	spec := generateNsqDDeploySpec(ctx, app, req)
+	if !nsqDDeploySpecEqual(old.Spec, spec) {
 		/*
 			old.Spec = spec
 			if err := r.Update(ctx, old); err != nil {
-				r.Log.Error(err, "reconcileNsqD update statefulset error")
+				r.Log.Error(err, "reconcileNsqD update deployment error")
 				return ctrl.Result{RequeueAfter: time.Second}, err
 			}
 		*/
@@ -169,7 +166,7 @@ func (r *NsqClusterReconciler) updateNsqDSts(ctx context.Context, app *apiv1.Nsq
 			"spec": spec,
 		})
 		if err := r.Patch(ctx, old, client.RawPatch(types.MergePatchType, spec)); err != nil {
-			r.Log.Error(err, "reconcileNsqD update statefulset spec error")
+			r.Log.Error(err, "reconcileNsqD update deployment spec error")
 			return ctrl.Result{RequeueAfter: time.Second}, err
 		}
 	}
@@ -191,18 +188,16 @@ func generateNsqDSvcSpec(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Re
 				TargetPort: intstr.FromInt(4151),
 			},
 		},
-		Selector:  NsqDLabels,
-		ClusterIP: "None", // headless service
-		Type:      corev1.ServiceTypeClusterIP,
+		Selector: NsqDLabels,
+		Type:     corev1.ServiceTypeClusterIP,
 	}
 }
 
-func generateNsqDStsSpec(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Request) appsv1.StatefulSetSpec {
-	spec := appsv1.StatefulSetSpec{
+func generateNsqDDeploySpec(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Request) appsv1.DeploymentSpec {
+	spec := appsv1.DeploymentSpec{
 		Selector: &metav1.LabelSelector{
 			MatchLabels: NsqDLabels,
 		},
-		ServiceName: NsqDSvcName,
 		Template: corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: NsqDLabels,
@@ -220,7 +215,7 @@ func generateNsqDStsSpec(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Re
 						Image:   "nsqio/nsq",
 						Command: []string{"/nsqd"},
 						Args: []string{
-							fmt.Sprintf("--broadcast-address=$(NSQD_POD_NAME).%s", NsqDSvcName),
+							"--broadcast-address=$(NSQD_POD_IP)",
 							"--broadcast-tcp-port=4150",
 						},
 						Ports: []corev1.ContainerPort{
@@ -234,10 +229,10 @@ func generateNsqDStsSpec(ctx context.Context, app *apiv1.NsqCluster, req ctrl.Re
 						ImagePullPolicy: corev1.PullIfNotPresent,
 						Env: []corev1.EnvVar{
 							{
-								Name: "NSQD_POD_NAME",
+								Name: "NSQD_POD_IP",
 								ValueFrom: &corev1.EnvVarSource{
 									FieldRef: &corev1.ObjectFieldSelector{
-										FieldPath: "metadata.name",
+										FieldPath: "status.podIP",
 									},
 								},
 							},
@@ -271,6 +266,6 @@ func nsqDSvcSpecEqual(old corev1.ServiceSpec, tmpl corev1.ServiceSpec) bool {
 	return reflect.DeepEqual(old, tmpl)
 }
 
-func nsqDStsSpecEqual(old appsv1.StatefulSetSpec, tmpl appsv1.StatefulSetSpec) bool {
+func nsqDDeploySpecEqual(old appsv1.DeploymentSpec, tmpl appsv1.DeploymentSpec) bool {
 	return reflect.DeepEqual(old, tmpl)
 }
